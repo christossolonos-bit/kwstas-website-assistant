@@ -11,8 +11,9 @@ export function EmbedScript() {
     <Script
       src="/embed.js"
       strategy="afterInteractive"
-      data-assistant-id="demo"
+      data-assistant-id="ygia"
       data-api-base={apiBase || undefined}
+      data-auto-scan="false"
     />
   );
 }

@@ -1,4 +1,9 @@
-import { detectLanguage, copyFor, type AppLanguage } from "../lib/language";
+import {
+  detectLanguage,
+  speakLanguage,
+  copyFor,
+  type AppLanguage,
+} from "../lib/language";
 import { navigateHost, type NavTarget } from "./navigate";
 import { enrichLinkedPages, scanCurrentPage } from "./scan-page";
 import { WIDGET_CSS } from "./styles";
@@ -14,6 +19,8 @@ type ScriptConfig = {
   apiBase: string;
   assistantId: string;
   autoScan: boolean;
+  /** Live shop origin, e.g. https://ygianaturalhealth.com */
+  siteBaseUrl: string;
 };
 
 function readConfig(): ScriptConfig {
@@ -28,10 +35,12 @@ function readConfig(): ScriptConfig {
       ? new URL(script.src).origin
       : window.location.origin);
   const autoScanAttr = script?.getAttribute("data-auto-scan");
+  const siteBaseAttr = script?.getAttribute("data-site-base") || "";
   return {
     apiBase: apiBase.replace(/\/$/, ""),
     assistantId: script?.getAttribute("data-assistant-id") || "default",
     autoScan: autoScanAttr == null ? true : autoScanAttr !== "false",
+    siteBaseUrl: siteBaseAttr.replace(/\/$/, ""),
   };
 }
 
@@ -58,6 +67,7 @@ class VoiceSiteAssistant {
   private busy = false;
   private uiLang: AppLanguage = "en";
   private mediaRecorder: MediaRecorder | null = null;
+  private recognition: SpeechRecognition | null = null;
   private chunks: BlobPart[] = [];
   private audio: HTMLAudioElement | null = null;
   private messagesEl!: HTMLDivElement;
@@ -217,7 +227,9 @@ class VoiceSiteAssistant {
         { class: "vsa-nav", type: "button" },
         `→ ${navigation.label || this.t().openPage}`,
       );
-      btn.addEventListener("click", () => navigateHost(navigation));
+      btn.addEventListener("click", () =>
+        navigateHost(navigation, this.config.siteBaseUrl),
+      );
       bubble.appendChild(document.createElement("br"));
       bubble.appendChild(btn);
     }
@@ -237,7 +249,11 @@ class VoiceSiteAssistant {
         const data = (await res.json()) as {
           welcomeMessage?: string;
           defaultLanguage?: AppLanguage;
+          siteBaseUrl?: string;
         };
+        if (data.siteBaseUrl) {
+          this.config.siteBaseUrl = data.siteBaseUrl.replace(/\/$/, "");
+        }
         if (data.defaultLanguage === "el" || data.defaultLanguage === "en") {
           this.setUiLang(data.defaultLanguage);
         }
@@ -324,11 +340,12 @@ class VoiceSiteAssistant {
       const data = (await res.json()) as ChatApiResponse;
       if (!res.ok) throw new Error(data.error || "Chat failed");
 
-      const replyLang = data.language || detectLanguage(data.answer) || lang;
+      // Voice follows the answer text (Greek → Greek voice, English → English)
+      const replyLang = speakLanguage(data.answer, data.language || lang);
       this.setUiLang(replyLang);
       this.addMessage("assistant", data.answer, data.navigation);
 
-      // Speak first — navigating reloads the page and would kill TTS mid-flight
+      // Speak first, then open the real shop page only if they asked to go there
       if (data.navigation?.url) {
         this.setStatus(
           this.t().goingTo(data.navigation.label || this.t().openPage),
@@ -337,10 +354,9 @@ class VoiceSiteAssistant {
       await this.speak(data.answer, replyLang);
 
       if (data.navigation?.url) {
-        navigateHost(data.navigation);
-      } else {
-        this.setStatus("");
+        navigateHost(data.navigation, this.config.siteBaseUrl);
       }
+      this.setStatus("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       this.addMessage("assistant", this.t().sorry(message));
@@ -368,15 +384,13 @@ class VoiceSiteAssistant {
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = lang === "el" ? "el-GR" : "en-US";
       const voices = synth.getVoices();
+      // Strict match: never pick an English voice for Greek (or the reverse)
       const preferred =
-        voices.find((v) =>
-          lang === "el"
-            ? /el(-|_)?GR|Greek/i.test(`${v.lang} ${v.name}`)
-            : /en(-|_)?US/i.test(v.lang) && /Jenny|Aria|Female|Natural/i.test(v.name),
-        ) ||
-        voices.find((v) =>
-          lang === "el" ? v.lang.toLowerCase().startsWith("el") : v.lang.toLowerCase().startsWith("en"),
-        );
+        lang === "el"
+          ? voices.find((v) => /^el\b/i.test(v.lang)) ||
+            voices.find((v) => /greek|ελλην/i.test(v.name))
+          : voices.find((v) => /^en-US\b/i.test(v.lang)) ||
+            voices.find((v) => /^en\b/i.test(v.lang));
       if (preferred) utter.voice = preferred;
       utter.onend = () => {
         this.setStatus("");
@@ -391,7 +405,7 @@ class VoiceSiteAssistant {
   /** Play TTS and resolve when playback finishes (or fails). */
   private speak(text: string, language?: AppLanguage): Promise<void> {
     if (this.muted || !text.trim()) return Promise.resolve();
-    const lang = language ?? detectLanguage(text);
+    const lang = speakLanguage(text, language);
     this.setStatus(this.t().speaking);
 
     return (async () => {
@@ -439,19 +453,55 @@ class VoiceSiteAssistant {
     })();
   }
 
+  private getSpeechRecognition(): SpeechRecognitionConstructor | null {
+    const w = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+  }
+
+  /**
+   * Record mic audio and transcribe on the server (Fish STT).
+   * Works in Chrome, Edge, Firefox, Safari — not tied to Web Speech API.
+   */
   private async toggleMic() {
+    if (this.recognition) {
+      this.recognition.stop();
+      return;
+    }
     if (this.mediaRecorder?.state === "recording") {
       this.mediaRecorder.stop();
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      // Last resort: browser-only speech (Chrome/Edge)
+      const SR = this.getSpeechRecognition();
+      if (SR) {
+        this.startBrowserRecognition(SR);
+        return;
+      }
       this.setStatus(this.t().micUnsupported);
       return;
     }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
       this.chunks = [];
-      const recorder = new MediaRecorder(stream);
+      const mimeCandidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+      ];
+      const mime =
+        mimeCandidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
       this.mediaRecorder = recorder;
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) this.chunks.push(e.data);
@@ -460,10 +510,10 @@ class VoiceSiteAssistant {
         stream.getTracks().forEach((t) => t.stop());
         this.micBtn.classList.remove("recording");
         void this.transcribeAndSend(
-          new Blob(this.chunks, { type: "audio/webm" }),
+          new Blob(this.chunks, { type: recorder.mimeType || mime || "audio/webm" }),
         );
       };
-      recorder.start();
+      recorder.start(250);
       this.micBtn.classList.add("recording");
       this.setStatus(this.t().listening);
     } catch {
@@ -471,12 +521,55 @@ class VoiceSiteAssistant {
     }
   }
 
+  private startBrowserRecognition(SR: SpeechRecognitionConstructor) {
+    const recognition = new SR();
+    this.recognition = recognition;
+    recognition.lang = this.uiLang === "el" ? "el-GR" : "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    let finalText = "";
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const piece = event.results[i]![0]?.transcript ?? "";
+        if (event.results[i]!.isFinal) finalText += piece;
+        else interim += piece;
+      }
+      const shown = (finalText || interim).trim();
+      if (shown) this.inputEl.value = shown;
+    };
+
+    recognition.onerror = () => {
+      this.recognition = null;
+      this.micBtn.classList.remove("recording");
+      this.setStatus(this.t().sttEmpty);
+    };
+
+    recognition.onend = () => {
+      this.recognition = null;
+      this.micBtn.classList.remove("recording");
+      const text = (finalText || this.inputEl.value).trim();
+      if (!text) {
+        this.setStatus(this.t().sttEmpty);
+        return;
+      }
+      // Match UI language to what was actually heard
+      this.setUiLang(detectLanguage(text));
+      void this.ask(text);
+    };
+
+    this.micBtn.classList.add("recording");
+    this.setStatus(this.t().listening);
+    recognition.start();
+  }
+
   private async transcribeAndSend(blob: Blob) {
     this.setStatus(this.t().transcribing);
     try {
       const form = new FormData();
       form.append("audio", blob, "speech.webm");
-      // Hint current UI language; Fish can still auto-detect within EL/EN
       form.append("language", this.uiLang);
       const res = await fetch(`${this.config.apiBase}/api/stt`, {
         method: "POST",
@@ -490,12 +583,32 @@ class VoiceSiteAssistant {
         return;
       }
       this.inputEl.value = text;
+      this.setUiLang(detectLanguage(text));
       await this.ask(text);
     } catch (err) {
       const message = err instanceof Error ? err.message : "STT failed";
       this.setStatus(message);
     }
   }
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognition;
+
+interface SpeechRecognition extends EventTarget {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  maxAlternatives: number;
+  start(): void;
+  stop(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: (() => void) | null;
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
 }
 
 function boot() {

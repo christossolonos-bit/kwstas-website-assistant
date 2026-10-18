@@ -1,22 +1,25 @@
+import { readSecretsSync } from "./secrets";
+
 export function getEnv() {
+  const secrets = readSecretsSync();
   return {
-    /** NVIDIA NIM free endpoint key (nvapi-...) — optional */
-    nvidiaApiKey: process.env.NVIDIA_API_KEY ?? "",
+    /** Required for full AI answers (NVIDIA NIM) */
+    nvidiaApiKey: secrets.nvidiaApiKey || process.env.NVIDIA_API_KEY || "",
     nvidiaBaseUrl:
       process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
     nvidiaModel:
       process.env.NVIDIA_MODEL ?? "nvidia/nemotron-3.5-super-vl-120b-a12b",
-    fishApiKey: process.env.FISH_API_KEY ?? "",
+    /** Settings UI / data/secrets.json wins over .env */
+    fishApiKey: secrets.fishApiKey || process.env.FISH_API_KEY || "",
     fishReferenceId: process.env.FISH_REFERENCE_ID ?? "",
     fishTtsModel: process.env.FISH_TTS_MODEL ?? "s2.1-pro-free",
-    /** edge (default) | fish */
     ttsProvider: (process.env.TTS_PROVIDER ?? "edge").toLowerCase(),
     edgeVoiceEl: process.env.EDGE_VOICE_EL ?? "",
     edgeVoiceEn: process.env.EDGE_VOICE_EN ?? "",
     adminSecret: process.env.ADMIN_SECRET ?? "change-me",
-    siteBaseUrl: process.env.SITE_BASE_URL ?? "http://localhost:3000",
+    siteBaseUrl:
+      process.env.SITE_BASE_URL ?? "https://ygianaturalhealth.com",
     appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-    /** When true, Fish STT uses a stub if no key */
     demoMode: (process.env.DEMO_MODE ?? "false").toLowerCase() === "true",
   };
 }

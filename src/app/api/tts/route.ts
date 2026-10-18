@@ -1,7 +1,8 @@
-import { detectLanguage, type AppLanguage } from "@/lib/language";
-import { edgeTextToSpeech } from "@/lib/edge-tts";
+import { speakLanguage } from "@/lib/language";
+import { edgeTextToSpeech, edgeVoiceFor } from "@/lib/edge-tts";
 import { fishTextToSpeech } from "@/lib/fish";
 import { getEnv } from "@/lib/env";
+import { loadStore } from "@/lib/rag/store";
 import { corsHeaders, json, optionsOk } from "@/lib/http";
 
 export async function OPTIONS() {
@@ -19,29 +20,49 @@ export async function POST(req: Request) {
       return json({ error: "text too long" }, 400);
     }
 
-    const language: AppLanguage =
-      body.language === "el" || body.language === "en"
-        ? body.language
-        : detectLanguage(text);
+    // Greek answers → Fish; English answers → Edge Ava Multilingual
+    const language = speakLanguage(text, body.language);
+    const { fishApiKey, fishReferenceId } = getEnv();
 
-    const { ttsProvider, fishApiKey } = getEnv();
-    let audio: ArrayBuffer;
-    let provider = "edge";
-
-    if (ttsProvider === "fish" && fishApiKey) {
-      audio = await fishTextToSpeech(text, language);
-      provider = "fish";
-    } else {
-      try {
-        audio = await edgeTextToSpeech(text, language);
-      } catch (edgeErr) {
-        if (fishApiKey) {
-          audio = await fishTextToSpeech(text, language);
-          provider = "fish-fallback";
-        } else {
-          throw edgeErr;
-        }
+    let referenceId = fishReferenceId;
+    try {
+      const store = await loadStore();
+      if (store.settings.fishReferenceId?.trim()) {
+        referenceId = store.settings.fishReferenceId.trim();
       }
+    } catch {
+      /* env fallback */
+    }
+
+    let audio: ArrayBuffer;
+    let provider: string;
+    let voiceLabel: string;
+
+    if (language === "el") {
+      if (fishApiKey && referenceId) {
+        try {
+          audio = await fishTextToSpeech(text, "el");
+          provider = "fish";
+          voiceLabel = referenceId;
+        } catch (fishErr) {
+          console.warn(
+            "Fish TTS (Greek) failed, falling back to Edge Athina:",
+            fishErr instanceof Error ? fishErr.message : fishErr,
+          );
+          audio = await edgeTextToSpeech(text, "el");
+          provider = "edge-fallback";
+          voiceLabel = edgeVoiceFor("el");
+        }
+      } else {
+        audio = await edgeTextToSpeech(text, "el");
+        provider = "edge";
+        voiceLabel = edgeVoiceFor("el");
+      }
+    } else {
+      // English → Edge Ava Multilingual
+      audio = await edgeTextToSpeech(text, "en");
+      provider = "edge";
+      voiceLabel = edgeVoiceFor("en");
     }
 
     return new Response(audio, {
@@ -51,7 +72,11 @@ export async function POST(req: Request) {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "no-store",
         "X-Reply-Language": language,
+        "X-TTS-Voice": voiceLabel,
         "X-TTS-Provider": provider,
+        ...(provider === "fish" && referenceId
+          ? { "X-Fish-Reference-Id": referenceId }
+          : {}),
       },
     });
   } catch (err) {

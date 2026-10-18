@@ -5,11 +5,11 @@ export default function AdminPage() {
     <main>
       <div className="site-nav">
         <a className="brand" href="/">
-          Voice Site Assistant
+          YGIA voice assistant
         </a>
         <ul className="nav-links">
           <li>
-            <a href="/demo">Demo store</a>
+            <a href="/">Call desk</a>
           </li>
         </ul>
       </div>

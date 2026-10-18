@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Voice Site Assistant",
+  title: "YGIA Call Assistant",
   description:
-    "Embeddable voice chat assistant for product questions and site navigation",
+    "Standalone voice call assistant for YGIA Natural Health — products, shipping, and returns",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body style={{ margin: 0 }}>{children}</body>
     </html>
   );
 }

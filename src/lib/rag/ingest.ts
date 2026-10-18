@@ -82,8 +82,10 @@ export async function rebuildIndex(): Promise<{ chunkCount: number }> {
     }
   }
 
-  // Cap total chunks so free local index stays fast
-  const limited = draft.slice(0, 400);
+  // Keep every FAQ; allow a large page/snippet budget for the full YGIA catalog
+  const faqs = draft.filter((d) => d.type === "qa");
+  const rest = draft.filter((d) => d.type !== "qa").slice(0, 1600);
+  const limited = [...faqs, ...rest];
   const texts = limited.map((d) => d.text);
   const embeddings = await embedTexts(texts);
   const chunks: KnowledgeChunk[] = limited.map((d, i) => ({

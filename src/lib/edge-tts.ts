@@ -4,7 +4,8 @@ import { getEnv } from "./env";
 
 const DEFAULT_VOICES: Record<AppLanguage, string> = {
   el: "el-GR-AthinaNeural",
-  en: "en-US-JennyNeural",
+  /** Ava Multilingual — natural English (and can handle mixed phrases) */
+  en: "en-US-AvaMultilingualNeural",
 };
 
 export function edgeVoiceFor(lang: AppLanguage): string {

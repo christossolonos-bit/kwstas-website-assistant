@@ -10,7 +10,8 @@
     "dev:widget": "esbuild src/widget/embed.ts --bundle --outfile=public/embed.js --format=iife --target=es2020 --watch",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "crawl:ygia": "tsx scripts/crawl-ygia.ts"
   },
   "dependencies": {
     "@andresaya/edge-tts": "^1.9.1",

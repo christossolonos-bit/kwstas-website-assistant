@@ -1,8 +1,8 @@
 # kwstas-website-assistant
 
-Embeddable **voice website assistant** — so customers get spoken answers instead of calling the owner for the same follow-ups.
+Embeddable **full AI voice website assistant** powered by **NVIDIA NIM**.
 
-No OpenAI required. No video avatar. The owner pastes the answers they usually give on the phone; the widget on the site talks back in Greek or English and can open the right page.
+No OpenAI. No video avatar. The model answers naturally in Greek or English, uses scanned page content (+ optional owner FAQs), speaks with Edge TTS, and can open the right page.
 
 ## Who it’s for
 
@@ -45,24 +45,29 @@ Owner FAQs in `/admin` still help a lot for phone-style answers that are not wri
 
 Your marketing site can stay fully static. Only this assistant needs a small Node host.
 
-## Quick start
+## Quick start (YGIA live site)
 
 ```bash
 npm install
 cp .env.example .env
-npm run seed
+# set NVIDIA_API_KEY=nvapi-... and SITE_BASE_URL=https://ygianaturalhealth.com
+npm run crawl:ygia
 npm run build:widget
 npm run dev
 ```
 
-- Demo: http://localhost:3000/demo  
-- Load answers: http://localhost:3000/admin (secret `change-me`)
+`npm run crawl:ygia` pulls **all products** + FAQ/shipping/refund pages from [ygianaturalhealth.com](https://ygianaturalhealth.com) into the knowledge store (re-run anytime the catalog changes).
+
+- **Call desk (main app):** http://localhost:3000 — Call / Store / Settings tabs
+- Settings: paste **Fish API key**, voice reference id, upload FAQ files
+- Store tab opens the live YGIA shop (or new tab if embed is blocked)
+- Advanced ingest also at http://localhost:3000/admin (secret `change-me`)
 
 ## Environment
 
 | Variable | Purpose |
 | --- | --- |
-| `NVIDIA_API_KEY` | Optional NIM key (`nvapi-...`) for human-like answers |
+| `NVIDIA_API_KEY` | **Required** NIM key (`nvapi-...`) — full AI answers |
 | `NVIDIA_MODEL` | Default `nvidia/nemotron-3.5-super-vl-120b-a12b` |
 | `TTS_PROVIDER` | `edge` (default) or `fish` |
 | `EDGE_VOICE_EL` / `EDGE_VOICE_EN` | Greek / English Edge voices |
@@ -70,7 +75,7 @@ npm run dev
 | `ADMIN_SECRET` | Protects `/admin` and ingest API |
 | `NEXT_PUBLIC_APP_URL` | Public URL of this assistant host |
 
-Without `NVIDIA_API_KEY`, the bot uses local FAQ matching only (no AI credits). With the key, it uses NVIDIA for natural answers and still only navigates to URLs in your catalog.
+`NVIDIA_API_KEY` is required. Site scan + FAQs are context for the model; navigation URLs must still come from the page catalog.
 
 ## Tip for fewer calls
 

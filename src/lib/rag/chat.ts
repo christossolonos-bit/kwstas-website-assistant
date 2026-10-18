@@ -16,196 +16,95 @@ function normalizePath(url: string): string {
   return path.replace(/\/$/, "") || "/";
 }
 
-function chunkLanguage(text: string): AppLanguage {
-  return detectLanguage(text);
+/** Only navigate when the customer clearly asks to open / go to a page. */
+function wantsNavigation(question: string): boolean {
+  return /\b(take me|show me|open|go to|navigate|bring me|redirect|see the (product )?page|want to (see|buy|order)|σελίδα|σελιδα|άνοιξε|ανοιξε|πήγαιν|πηγαιν|πάρε με|παρε με|δείξε|δειξε|πήγαινε|οδήγησ|θέλω να (δω|ανοίξ|αγοράσ)|θελω να (δω|ανοιξ|αγορασ))/i.test(
+    question,
+  );
 }
 
 function resolveNavigation(
   pages: PageEntry[],
   hits: Array<KnowledgeChunk & { score: number }>,
   lang: AppLanguage,
+  question: string,
   proposed?: { url?: string; hash?: string; label?: string } | null,
 ): NavigationTarget | null {
+  // Never invent a page change for a normal Q&A answer
+  if (!wantsNavigation(question)) return null;
+
   const allowed = new Map(
     pages.map((p) => [normalizePath(p.url), p] as const),
   );
 
-  if (proposed?.url) {
-    const page = allowed.get(normalizePath(proposed.url));
-    if (page) {
-      return {
-        url: page.url,
-        hash: proposed.hash || page.hash,
-        label:
-          proposed.label ||
-          page.title ||
-          (lang === "el" ? "Άνοιγμα σελίδας" : "Open page"),
-      };
-    }
-  }
-
-  const topPage = hits.find((h) => h.type === "page" && h.score > 0.22);
-  if (topPage?.url) {
-    const page = allowed.get(normalizePath(topPage.url));
-    if (page) {
-      return {
-        url: page.url,
-        hash: topPage.hash || page.hash,
-        label: page.title,
-      };
-    }
-  }
-
-  for (const hit of hits) {
-    if (!hit.url) continue;
-    const page = allowed.get(normalizePath(hit.url));
-    if (page && hit.score > 0.22) {
-      return {
-        url: page.url,
-        hash: hit.hash || page.hash,
-        label: page.title,
-      };
-    }
-  }
-
-  const hinted = pageForProductHint(
-    pages,
-    hits.map((h) => `${h.title} ${h.text}`).join("\n"),
-  );
-  if (hinted) {
+  const tryPage = (
+    url?: string,
+    hash?: string,
+    label?: string,
+  ): NavigationTarget | null => {
+    if (!url) return null;
+    const page = allowed.get(normalizePath(url));
+    if (!page) return null;
     return {
-      url: hinted.url,
-      hash: hinted.hash,
-      label: hinted.title,
+      url: page.url,
+      hash: hash || page.hash,
+      label:
+        label ||
+        page.title ||
+        (lang === "el" ? "Άνοιγμα σελίδας" : "Open page"),
     };
-  }
+  };
 
-  return null;
+  const fromModel = tryPage(proposed?.url, proposed?.hash, proposed?.label);
+  if (fromModel) return fromModel;
+
+  // If they asked to open a page but the model omitted URL, use best product/collection hit
+  const top = hits.find(
+    (h) =>
+      h.url &&
+      h.score > 0.2 &&
+      (/^\/products\//.test(h.url) ||
+        /^\/collections\//.test(h.url) ||
+        /^\/pages\//.test(h.url) ||
+        /^\/policies\//.test(h.url)),
+  );
+  return tryPage(top?.url, top?.hash, top?.title);
 }
 
-function pageForProductHint(
-  pages: PageEntry[],
-  text: string,
-): PageEntry | undefined {
-  const t = text.toLowerCase();
-  return pages.find((p) => {
-    const title = p.title.toLowerCase().split(/[\/|]/)[0].trim();
-    if (title.length > 3 && t.includes(title)) return true;
-    if (t.includes("serum") && p.url.includes("serum")) return true;
-    if (
-      (t.includes("cream") || t.includes("night") || t.includes("κρεμ")) &&
-      p.url.includes("cream")
-    )
-      return true;
-    return (p.keywords ?? []).some(
-      (k) => k.length > 3 && t.includes(k.toLowerCase()),
-    );
-  });
-}
-
-function extractAnswer(chunk: KnowledgeChunk, lang: AppLanguage): string {
-  let answer = chunk.text;
-  const aMatch = chunk.text.match(/\nA:\s*([\s\S]+)/i);
-  if (aMatch) answer = aMatch[1].trim();
-  answer = answer.replace(/\nProduct:\s*.+$/i, "").trim();
-
-  if (chunk.type === "page") {
-    const desc =
-      chunk.text
-        .split(/\n/)
-        .map((s) => s.trim())
-        .find((s) => s.length > 35) || chunk.title;
-    const sentences = desc.split(/(?<=[.!?·])\s+/);
-    const preferred =
-      sentences.find((s) => detectLanguage(s) === lang) ||
-      sentences[0] ||
-      chunk.title;
-    answer =
-      lang === "el"
-        ? `Για το ${chunk.title.split("/")[0]!.trim()}: ${preferred}`
-        : `About ${chunk.title.split("/")[0]!.trim()}: ${preferred}`;
-  }
-
-  if (answer.length > 420) answer = `${answer.slice(0, 400).trim()}…`;
-  return answer;
-}
+const POLICY_RE =
+  /\b(ship|shipping|delivery|deliver|return|refund|payment|pay|cod|cash on delivery|contact|phone|cancel|order arrive|αντικαταβολ|αποστολ|επιστροφ|πληρωμ|επικοινων|ακυρω|παραγγελ)/i;
 
 async function rankHits(question: string) {
   const queryEmbedding = await embedText(question);
-  const rawHits = await searchChunks(queryEmbedding, 10);
-  const lang = detectLanguage(question);
+  const rawHits = await searchChunks(queryEmbedding, 24);
+  const policyAsk = POLICY_RE.test(question);
   return rawHits
     .map((h) => {
       const lex = lexicalOverlap(question, `${h.title} ${h.text}`);
-      const langBoost =
-        h.type === "qa" && chunkLanguage(`${h.title} ${h.text}`) === lang
-          ? 0.12
-          : 0;
-      const qaBoost = h.type === "qa" ? 0.06 : 0;
-      return {
-        ...h,
-        score: h.score * 0.65 + lex * 0.35 + langBoost + qaBoost,
-      };
+      let score = h.score * 0.55 + lex * 0.45;
+      // Prefer curated FAQs for call-deflection topics
+      if (h.type === "qa") score += policyAsk ? 0.35 : 0.12;
+      if (policyAsk && /polic|faq|shipping|refund|return/i.test(h.url ?? "")) {
+        score += 0.15;
+      }
+      return { ...h, score };
     })
     .sort((a, b) => b.score - a.score);
-}
-
-async function localAnswer(
-  question: string,
-  pages: PageEntry[],
-  lang: AppLanguage,
-): Promise<ChatResponse> {
-  const hits = await rankHits(question);
-  const bestQa = hits.find((h) => h.type === "qa");
-  const best =
-    bestQa && hits[0] && bestQa.score >= hits[0].score - 0.05
-      ? bestQa
-      : hits[0];
-
-  if (!best || best.score < 0.16) {
-    return {
-      answer:
-        lang === "el"
-          ? "Μπορώ να βοηθήσω με προϊόντα, συστατικά, αποστολές και επιστροφές. Πείτε μου λίγο πιο συγκεκριμένα τι χρειάζεστε."
-          : "I can help with products, ingredients, shipping, and returns. Tell me a bit more specifically what you need.",
-      navigation: null,
-      language: lang,
-      sources: [],
-    };
-  }
-
-  let chosen = best;
-  if (chosen.type === "qa" && chunkLanguage(chosen.text) !== lang) {
-    const sameLang = hits.find(
-      (h) =>
-        h.type === "qa" &&
-        chunkLanguage(`${h.title} ${h.text}`) === lang &&
-        h.score >= best.score - 0.15,
-    );
-    if (sameLang) chosen = sameLang;
-  }
-
-  const answerBody = extractAnswer(chosen, lang);
-  const navigation = resolveNavigation(pages, hits, lang);
-  const navCue = navigation
-    ? lang === "el"
-      ? " Σας ανοίγω τη σχετική σελίδα."
-      : " I am opening the related page for you."
-    : "";
-
-  return {
-    answer: `${answerBody}${navCue}`,
-    navigation,
-    language: lang,
-    sources: hits.slice(0, 3).map((h) => ({ title: h.title, url: h.url })),
-  };
 }
 
 function extractJsonObject(raw: string): {
   answer?: string;
   navigation?: { url?: string; hash?: string; label?: string } | null;
+  language?: string;
 } {
-  const trimmed = raw.trim();
+  let trimmed = raw.trim();
+  // Strip common wrappers from reasoning models
+  trimmed = trimmed
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .trim();
+
   try {
     return JSON.parse(trimmed);
   } catch {
@@ -217,7 +116,7 @@ function extractJsonObject(raw: string): {
         /* fall through */
       }
     }
-    return { answer: trimmed, navigation: null };
+    return { answer: trimmed.replace(/\{[\s\S]*$/, "").trim() || trimmed, navigation: null };
   }
 }
 
@@ -226,8 +125,9 @@ async function nvidiaAnswer(opts: {
   currentUrl?: string;
   lang: AppLanguage;
   pages: PageEntry[];
+  faqs: Array<{ question: string; answer: string }>;
 }): Promise<ChatResponse> {
-  const { question, currentUrl, lang, pages } = opts;
+  const { question, currentUrl, lang, pages, faqs } = opts;
   const hits = await rankHits(question);
 
   const context = hits
@@ -238,49 +138,99 @@ async function nvidiaAnswer(opts: {
     )
     .join("\n\n");
 
-  const pageCatalog = pages
-    .map((p) => `- ${p.title}: ${p.url}${p.hash ?? ""} — ${p.description}`)
+  // Always give the model the full curated FAQ set (small, high-value for call deflection)
+  const faqBlock = faqs
+    .map((f, i) => `FAQ ${i + 1}\nQ: ${f.question}\nA: ${f.answer}`)
+    .join("\n\n");
+
+  // Keep catalog short: hit pages + policy/home/collection pages
+  const hitUrls = new Set(
+    hits
+      .map((h) => (h.url ? normalizePath(h.url) : ""))
+      .filter(Boolean),
+  );
+  const catalogPages = pages.filter((p) => {
+    const path = normalizePath(p.url);
+    if (hitUrls.has(path)) return true;
+    if (/^\/(policies|pages|collections)\b/.test(path) || path === "/") return true;
+    return false;
+  });
+  // If still thin, add a few product titles that lexically match the question
+  const extraProducts = pages
+    .filter((p) => p.url.startsWith("/products/"))
+    .map((p) => ({
+      p,
+      score: lexicalOverlap(question, `${p.title} ${p.description} ${p.keywords?.join(" ") ?? ""}`),
+    }))
+    .filter((x) => x.score > 0.15)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12)
+    .map((x) => x.p);
+  const seen = new Set(catalogPages.map((p) => p.url));
+  for (const p of extraProducts) {
+    if (!seen.has(p.url)) {
+      catalogPages.push(p);
+      seen.add(p.url);
+    }
+  }
+
+  const pageCatalog = catalogPages
+    .map((p) => {
+      const snippet = (p.description || "").replace(/\s+/g, " ").slice(0, 140);
+      return `- ${p.title}: ${p.url}${p.hash ?? ""} — ${snippet}`;
+    })
     .join("\n");
 
   const languageRule =
     lang === "el"
-      ? "Reply in fluent natural Modern Greek (ελληνικά), speakable on a phone."
-      : "Reply in fluent natural English, speakable on a phone.";
+      ? "Answer in fluent, natural Modern Greek (ελληνικά) — warm and conversational, like a helpful shop person on the phone."
+      : "Answer in fluent, natural English — warm and conversational, like a helpful shop person on the phone.";
 
-  const system = `You are a helpful website voice assistant for a shop. Customers ask the same things they would call about.
+  const system = `You are the full AI voice assistant for YGIA Natural Health (ygianaturalhealth.com) — herbal supplements by herbalist Costas Argyrides. Customers talk to you instead of calling the shop.
 
-Rules:
-1. Use ONLY the knowledge below. Do not invent prices, policies, or pages.
-2. Sound warm and human, 2–4 short sentences (good for text-to-speech).
-3. If a page would help, pick ONE URL from the page catalog. Never invent URLs.
-4. If unsure, say so briefly and ask one clarifying question; navigation=null.
-5. ${languageRule}
+Your job:
+1. Understand natural, messy questions in Greek or English about products, benefits, shipping, returns, payments, and contact.
+2. Answer using OFFICIAL FAQs first for shipping, returns, payments, COD/αντικαταβολή, contact, and cancellations — use those exact facts (times, prices, emails, phone). Then use product knowledge for catalog questions (names, prices, stock, ingredients, collections/categories).
+3. Sound human: 2–5 short spoken sentences (TTS). No bullet lists, no markdown. Never say you "don't have" a policy detail if it appears in the FAQ block. If they ask for a category (sleep, joints, immune, women's health, etc.), name a few matching products — do NOT change page unless they ask.
+4. Navigation is OPT-IN only. Set "navigation" to null for normal questions (price, shipping, what is X, recommendations). ONLY set navigation when they clearly ask to open/go to/show/take them to a page (e.g. "take me to Ashwagandha", "άνοιξε τη σελίδα", "show me the product"). Then use ONE real catalog URL (/products/..., /collections/..., /pages/..., /policies/...) — that opens the live ygianaturalhealth.com page in the browser. Never invent URLs. Never navigate just because a product was mentioned.
+5. Health safety: You are not a doctor. Do not diagnose or prescribe. For medical conditions, pregnancy, medications, or serious symptoms, tell them to consult their personal doctor / pharmacist. You may still describe what a product is marketed for based on the site text.
+6. ${languageRule}
+
 Current page: ${currentUrl ?? "unknown"}
 
-Page catalog:
-${pageCatalog || "(empty)"}
+Official FAQs (source of truth for common call questions):
+${faqBlock || "(none)"}
 
-Knowledge:
-${context || "(no matches)"}
+Page catalog (only these URLs are allowed for navigation):
+${pageCatalog || "(none yet — answer from knowledge text only; navigation=null)"}
 
-Return ONLY valid JSON (no markdown):
+Retrieved product / page knowledge:
+${context || "(no indexed matches yet — ask a clarifying question)"}
+
+Return ONLY valid JSON, no markdown fences:
 {"answer":"...","navigation":{"url":"/path","hash":"#optional","label":"..."}|null,"language":"${lang}"}`;
 
   const raw = await nvidiaChatCompletion({
     system,
     user: question,
-    temperature: 0.4,
+    temperature: 0.5,
   });
   const parsed = extractJsonObject(raw);
 
   const fallback =
     lang === "el"
-      ? "Δεν είμαι σίγουρος ακόμα. Ρωτήστε με για προϊόν, αποστολές ή επιστροφές."
-      : "I am not sure about that yet. Try asking about a product, shipping, or returns.";
+      ? "Συγγνώμη, δεν μπόρεσα να απαντήσω καθαρά. Μπορείτε να το ξαναπείτε με λίγο διαφορετικά λόγια;"
+      : "Sorry — I couldn't form a clear answer. Could you rephrase that for me?";
 
   return {
     answer: parsed.answer?.trim() || fallback,
-    navigation: resolveNavigation(pages, hits, lang, parsed.navigation),
+    navigation: resolveNavigation(
+      pages,
+      hits,
+      lang,
+      question,
+      parsed.navigation,
+    ),
     language: lang,
     sources: hits.slice(0, 3).map((h) => ({ title: h.title, url: h.url })),
   };
@@ -294,19 +244,17 @@ export async function answerQuestion(opts: {
   const lang = detectLanguage(question);
   const store = await loadStore();
 
-  if (hasNvidia()) {
-    try {
-      return await nvidiaAnswer({
-        question,
-        currentUrl,
-        lang,
-        pages: store.pages,
-      });
-    } catch (err) {
-      console.error("NVIDIA chat failed, using local FAQ matcher:", err);
-      return localAnswer(question, store.pages, lang);
-    }
+  if (!hasNvidia()) {
+    throw new Error(
+      "NVIDIA_API_KEY is missing. Add it to .env to enable the full AI assistant.",
+    );
   }
 
-  return localAnswer(question, store.pages, lang);
+  return nvidiaAnswer({
+    question,
+    currentUrl,
+    lang,
+    pages: store.pages,
+    faqs: store.faqs.map((f) => ({ question: f.question, answer: f.answer })),
+  });
 }

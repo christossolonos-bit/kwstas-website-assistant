@@ -15,10 +15,26 @@ export function detectLanguage(text: string): AppLanguage {
   }
 
   if (greek === 0 && latin === 0) return "en";
-  // Prefer Greek when Greek letters are present at a meaningful share
-  if (greek >= 2 && greek >= latin * 0.35) return "el";
-  if (greek > latin) return "el";
+  // Any real Greek in the text → Greek (avoids English TTS on Ελληνικά)
+  if (greek >= 1) return "el";
   return "en";
+}
+
+/**
+ * Language for TTS: always follow the spoken text so Greek never plays
+ * through an English voice (and vice versa). Hint only if text has no letters.
+ */
+export function speakLanguage(
+  text: string,
+  hint?: AppLanguage | string | null,
+): AppLanguage {
+  const sample = text.trim();
+  if (!sample) return hint === "el" ? "el" : "en";
+  const fromText = detectLanguage(sample);
+  // Clear script in the answer always wins over any API/UI hint
+  if (/[\u0370-\u03FF\u1F00-\u1FFF]/.test(sample)) return "el";
+  if (/[A-Za-z]/.test(sample)) return "en";
+  return hint === "el" || hint === "en" ? hint : fromText;
 }
 
 export function fishLanguageTag(lang: AppLanguage): string {

@@ -1,4 +1,4 @@
-import { assertAdmin } from "@/lib/env";
+import { assertAdmin, getEnv } from "@/lib/env";
 import { json, optionsOk } from "@/lib/http";
 import {
   ingestFaqsFromText,
@@ -6,6 +6,7 @@ import {
   replacePages,
 } from "@/lib/rag/ingest";
 import { loadStore, updateSettings } from "@/lib/rag/store";
+import { maskSecret, readSecretsSync, updateSecrets } from "@/lib/secrets";
 import type { PageEntry } from "@/lib/types";
 
 export async function OPTIONS() {
@@ -17,12 +18,18 @@ export async function GET(req: Request) {
     return json({ error: "Unauthorized" }, 401);
   }
   const store = await loadStore();
+  const secrets = readSecretsSync();
+  const env = getEnv();
   return json({
     updatedAt: store.updatedAt,
     faqCount: store.faqs.length,
     pageCount: store.pages.length,
     chunkCount: store.chunks.length,
     settings: store.settings,
+    secrets: {
+      fishApiKey: maskSecret(secrets.fishApiKey || env.fishApiKey),
+      nvidiaApiKey: maskSecret(secrets.nvidiaApiKey || env.nvidiaApiKey),
+    },
     pages: store.pages,
     faqs: store.faqs.map(({ id, question, answer, product, tags }) => ({
       id,
@@ -49,6 +56,8 @@ export async function POST(req: Request) {
         fishReferenceId?: string;
         siteBaseUrl?: string;
       };
+      fishApiKey?: string;
+      nvidiaApiKey?: string;
     };
 
     const action = body.action ?? "ingest_faqs";
@@ -76,7 +85,26 @@ export async function POST(req: Request) {
 
     if (action === "settings") {
       const store = await updateSettings(body.settings ?? {});
-      return json({ ok: true, settings: store.settings });
+      const secretPatch: { fishApiKey?: string; nvidiaApiKey?: string } = {};
+      if (typeof body.fishApiKey === "string" && body.fishApiKey.trim()) {
+        secretPatch.fishApiKey = body.fishApiKey.trim();
+      }
+      if (typeof body.nvidiaApiKey === "string" && body.nvidiaApiKey.trim()) {
+        secretPatch.nvidiaApiKey = body.nvidiaApiKey.trim();
+      }
+      if (Object.keys(secretPatch).length) {
+        await updateSecrets(secretPatch);
+      }
+      const secrets = readSecretsSync();
+      const env = getEnv();
+      return json({
+        ok: true,
+        settings: store.settings,
+        secrets: {
+          fishApiKey: maskSecret(secrets.fishApiKey || env.fishApiKey),
+          nvidiaApiKey: maskSecret(secrets.nvidiaApiKey || env.nvidiaApiKey),
+        },
+      });
     }
 
     if (action === "clear_faqs") {

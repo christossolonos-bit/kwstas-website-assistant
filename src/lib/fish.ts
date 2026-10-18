@@ -15,14 +15,19 @@ export async function fishTextToSpeech(
     return synthesizeSilentMp3();
   }
 
-  let referenceId = fishReferenceId;
+  let referenceId = (fishReferenceId || "").trim();
   try {
     const store = await loadStore();
-    if (store.settings.fishReferenceId) {
-      referenceId = store.settings.fishReferenceId;
-    }
+    const fromAdmin = (store.settings.fishReferenceId || "").trim();
+    if (fromAdmin) referenceId = fromAdmin;
   } catch {
     /* use env fallback */
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Fish voice reference_id is missing. Save it in Settings or set FISH_REFERENCE_ID.",
+    );
   }
 
   const lang = language ?? detectLanguage(text);
@@ -31,10 +36,8 @@ export async function fishTextToSpeech(
     format: "mp3",
     language: fishLanguageTag(lang),
     normalize: true,
+    reference_id: referenceId,
   };
-  if (referenceId) {
-    body.reference_id = referenceId;
-  }
 
   const res = await fetch(FISH_TTS_URL, {
     method: "POST",
@@ -54,6 +57,23 @@ export async function fishTextToSpeech(
   return res.arrayBuffer();
 }
 
+/** Strip Fish Pro speaker/emotion markup into plain customer text. */
+function cleanTranscript(raw: string): string {
+  return raw
+    .replace(/<\|speaker:\d+\|>/g, " ")
+    .replace(/\[[^\]]{1,40}\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extForMime(mimeType: string): string {
+  if (mimeType.includes("mp4") || mimeType.includes("m4a")) return "m4a";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
+}
+
 export async function fishSpeechToText(
   audio: Buffer,
   mimeType: string,
@@ -62,59 +82,49 @@ export async function fishSpeechToText(
   const { fishApiKey, demoMode } = getEnv();
 
   if (demoMode || !fishApiKey) {
-    // Alternate demo transcripts so Greek mic path can be exercised offline
-    if (languageHint === "el") {
-      return "Τι προτείνετε για ξηρό δέρμα;";
-    }
-    return "What products do you recommend for dry skin?";
+    throw new Error(
+      "Fish API key missing. Add it in Settings so the mic works in every browser.",
+    );
   }
 
-  const form = new FormData();
+  if (!audio.length) {
+    throw new Error("Empty audio recording");
+  }
+
+  const type = mimeType || "audio/webm";
+  const filename = `speech.${extForMime(type)}`;
   const bytes = new Uint8Array(audio);
-  const blob = new Blob([bytes], { type: mimeType || "audio/webm" });
-  form.append("audio", blob, "audio.webm");
-  form.append("file", blob, "audio.webm");
+  const blob = new Blob([bytes], { type });
+
+  const form = new FormData();
+  form.append("audio", blob, filename);
+  form.append("ignore_timestamps", "true");
   if (languageHint && languageHint !== "auto") {
     form.append("language", fishLanguageTag(languageHint));
   }
 
-  const headers: HeadersInit = {
-    Authorization: `Bearer ${fishApiKey}`,
-    model: "transcribe-1-pro",
-  };
-
   const res = await fetch(FISH_STT_URL, {
     method: "POST",
-    headers,
+    headers: {
+      Authorization: `Bearer ${fishApiKey}`,
+      model: "transcribe-1-pro",
+    },
     body: form,
   });
 
   if (!res.ok) {
-    const altForm = new FormData();
-    altForm.append("audio", blob, "audio.webm");
-    altForm.append("file", blob, "audio.webm");
-    if (languageHint && languageHint !== "auto") {
-      altForm.append("language", fishLanguageTag(languageHint));
-    }
-
-    const alt = await fetch("https://api.fish.audio/v1/speech-to-text", {
-      method: "POST",
-      headers,
-      body: altForm,
-    });
-    if (!alt.ok) {
-      const errText = await alt.text();
-      throw new Error(`Fish STT failed (${alt.status}): ${errText}`);
-    }
-    const data = (await alt.json()) as { text?: string; transcript?: string };
-    return (data.text || data.transcript || "").trim();
+    const errText = await res.text();
+    throw new Error(`Fish STT failed (${res.status}): ${errText}`);
   }
 
   const data = (await res.json()) as { text?: string; transcript?: string };
-  return (data.text || data.transcript || "").trim();
+  const text = cleanTranscript(data.text || data.transcript || "");
+  if (!text) {
+    throw new Error("No speech detected in the recording — try again closer to the mic");
+  }
+  return text;
 }
 
-/** Tiny valid-ish silent mp3 placeholder for demo mode. */
 function synthesizeSilentMp3(): ArrayBuffer {
   const bytes = new Uint8Array([
     0xff, 0xfb, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -25,41 +25,24 @@ type StoreSnapshot = {
 const DEFAULT_PAGES_JSON = `[
   {
     "id": "home",
-    "url": "/demo",
-    "title": "Home",
-    "description": "Lumina Skin demo storefront home",
-    "keywords": ["home", "shop"]
-  },
-  {
-    "id": "serum",
-    "url": "/demo/products/hydra-glow-serum",
-    "title": "Hydra Glow Serum",
-    "description": "Hydrating serum for dry skin",
-    "hash": "#how-to-use",
-    "keywords": ["serum", "dry skin"]
-  },
-  {
-    "id": "cream",
-    "url": "/demo/products/night-repair-cream",
-    "title": "Night Repair Cream",
-    "description": "Overnight cream for fine lines",
-    "hash": "#ingredients",
-    "keywords": ["night cream", "wrinkles"]
+    "url": "/",
+    "title": "YGIA Natural Health",
+    "description": "Herbal supplements by Costas Argyrides",
+    "keywords": ["ygia", "supplements", "herbal"]
   },
   {
     "id": "shipping",
-    "url": "/demo/shipping",
-    "title": "Shipping & Returns",
-    "description": "Shipping and 30-day returns",
-    "hash": "#returns",
-    "keywords": ["shipping", "returns"]
+    "url": "/policies/shipping-policy",
+    "title": "Shipping policy",
+    "description": "Shipping times for Cyprus, Greece, and worldwide",
+    "keywords": ["shipping", "delivery"]
   },
   {
-    "id": "about",
-    "url": "/demo/about",
-    "title": "About Lumina Skin",
-    "description": "Brand story",
-    "keywords": ["about", "brand"]
+    "id": "faq",
+    "url": "/pages/faq",
+    "title": "FAQ",
+    "description": "Payments, COD, returns, contact",
+    "keywords": ["faq", "returns", "payment"]
   }
 ]`;
 
@@ -81,10 +64,13 @@ A: Για τα πιο συχνά θέματα μπορώ να σας βοηθή�
   const [pagesJson, setPagesJson] = useState(DEFAULT_PAGES_JSON);
   const [welcome, setWelcome] = useState("");
   const [fishRef, setFishRef] = useState("");
-  const [siteBase, setSiteBase] = useState("http://localhost:3000");
+  const [fishKey, setFishKey] = useState("");
+  const [fishHint, setFishHint] = useState("");
+  const [siteBase, setSiteBase] = useState("https://ygianaturalhealth.com");
   const [snapshot, setSnapshot] = useState<StoreSnapshot | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [fileName, setFileName] = useState("");
 
   const authHeaders = useCallback(
     () => ({
@@ -106,7 +92,12 @@ A: Για τα πιο συχνά θέματα μπορώ να σας βοηθή�
       setSnapshot(data);
       setWelcome(data.settings.welcomeMessage || "");
       setFishRef(data.settings.fishReferenceId || "");
-      setSiteBase(data.settings.siteBaseUrl || "http://localhost:3000");
+      setSiteBase(
+        data.settings.siteBaseUrl || "https://ygianaturalhealth.com",
+      );
+      if (data.secrets?.fishApiKey?.configured) {
+        setFishHint(data.secrets.fishApiKey.hint || "set");
+      }
       if (data.pages?.length) {
         setPagesJson(JSON.stringify(data.pages, null, 2));
       }
@@ -158,6 +149,26 @@ A: Για τα πιο συχνά θέματα μπορώ να σας βοηθή�
             Load current store
           </button>
         </div>
+
+        <label>
+          Upload FAQ file
+          <input
+            type="file"
+            accept=".txt,.md,.csv,.json,text/plain,text/markdown,application/json"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setFileName(file.name);
+              const reader = new FileReader();
+              reader.onload = () => {
+                setFaqsText(String(reader.result || ""));
+                setStatus(`Loaded ${file.name}`);
+              };
+              reader.readAsText(file);
+            }}
+          />
+        </label>
+        {fileName ? <p className="muted">File: {fileName}</p> : null}
 
         <label>
           Bulk Q&amp;A (Markdown Q:/A:, CSV, or JSON array)
@@ -238,9 +249,26 @@ A: Για τα πιο συχνά θέματα μπορώ να σας βοηθή�
           />
         </label>
         <label>
-          Fish voice reference_id
+          Fish Audio API key
+          <input
+            type="password"
+            value={fishKey}
+            onChange={(e) => setFishKey(e.target.value)}
+            placeholder={
+              fishHint
+                ? `Configured ${fishHint} — paste new to replace`
+                : "Paste Fish API key"
+            }
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Fish voice reference_id (used for Greek answers)
           <input value={fishRef} onChange={(e) => setFishRef(e.target.value)} />
         </label>
+        <p className="muted" style={{ marginTop: "-0.5rem" }}>
+          Greek TTS = Fish voice · English TTS = Edge Ava Multilingual
+        </p>
         <label>
           Site base URL
           <input value={siteBase} onChange={(e) => setSiteBase(e.target.value)} />
@@ -256,7 +284,10 @@ A: Για τα πιο συχνά θέματα μπορώ να σας βοηθή�
                 fishReferenceId: fishRef,
                 siteBaseUrl: siteBase,
               },
-            }).catch((err) => setError(err.message))
+              ...(fishKey.trim() ? { fishApiKey: fishKey.trim() } : {}),
+            })
+              .then(() => setFishKey(""))
+              .catch((err) => setError(err.message))
           }
         >
           Save settings
