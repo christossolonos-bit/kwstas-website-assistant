@@ -3,14 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "../app/calldesk.css";
 
-type Tab = "call" | "store" | "settings";
+type Tab = "call" | "store";
 
-type NavTarget = { url: string; hash?: string; label?: string };
+type NavTarget = {
+  url: string;
+  hash?: string;
+  label?: string;
+  image?: string;
+  choice?: "A" | "B" | "C";
+};
 
 type Msg = {
   role: "user" | "assistant";
   text: string;
   navigation?: NavTarget | null;
+  listings?: NavTarget[];
 };
 
 type SecretsMeta = {
@@ -32,11 +39,15 @@ export function CallDesk() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
-  const [micLang, setMicLang] = useState<"el" | "en">("el");
   const [muted, setMuted] = useState(false);
   const [sttReady, setSttReady] = useState(false);
   const [siteBase, setSiteBase] = useState("https://ygianaturalhealth.com");
   const [welcome, setWelcome] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [lastListings, setLastListings] = useState<NavTarget[]>([]);
+  const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([]);
+  const messagesRef = useRef<Msg[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -47,6 +58,7 @@ export function CallDesk() {
   const [secret, setSecret] = useState("change-me");
   const [fishKey, setFishKey] = useState("");
   const [fishRef, setFishRef] = useState("");
+  const [fishRefEn, setFishRefEn] = useState("");
   const [nvidiaKey, setNvidiaKey] = useState("");
   const [welcomeEdit, setWelcomeEdit] = useState("");
   const [siteBaseEdit, setSiteBaseEdit] = useState("");
@@ -107,27 +119,66 @@ export function CallDesk() {
       if (!q || busy) return;
       setBusy(true);
       setDraft("");
-      setMessages((m) => [...m, { role: "user", text: q }]);
+      const prior = messagesRef.current;
+      const nextUser: Msg = { role: "user", text: q };
+      const withUser = [...prior, nextUser];
+      messagesRef.current = withUser;
+      setMessages(withUser);
       setStatus("Thinking…");
       try {
+        const history = withUser.slice(-10).map((m) => ({
+          role: m.role,
+          content: m.text,
+        }));
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q, currentUrl: "call-desk" }),
+          body: JSON.stringify({
+            question: q,
+            currentUrl: "call-desk",
+            language: "en",
+            history,
+            lastListings,
+            ...(profilePhone.trim()
+              ? { profilePhone: profilePhone.trim() }
+              : {}),
+          }),
         });
         const data = (await res.json()) as {
           answer?: string;
           navigation?: NavTarget | null;
+          listings?: NavTarget[];
           language?: string;
+          profile?: { id: string; name: string } | null;
+          suggestedPrompts?: string[];
           error?: string;
         };
         if (!res.ok) throw new Error(data.error || "Chat failed");
         const answer = data.answer || "…";
-        setMessages((m) => [
-          ...m,
-          { role: "assistant", text: answer, navigation: data.navigation },
-        ]);
-        await speak(answer, data.language);
+        const listings =
+          data.listings?.length
+            ? data.listings
+            : data.navigation?.url
+              ? [data.navigation]
+              : [];
+        if (listings.length) setLastListings(listings);
+        if (data.profile?.name) setProfileName(data.profile.name);
+        setSuggestedPrompts(
+          Array.isArray(data.suggestedPrompts) ? data.suggestedPrompts : [],
+        );
+        const withAssistant: Msg[] = [
+          ...withUser,
+          {
+            role: "assistant",
+            text: answer,
+            navigation: data.navigation,
+            listings,
+          },
+        ];
+        messagesRef.current = withAssistant;
+        setMessages(withAssistant);
+        await speak(answer, "en");
+        // Only auto-open when the customer asked to go to the page
         if (data.navigation?.url) {
           const url = resolveShopUrl(
             `${data.navigation.url}${data.navigation.hash || ""}`,
@@ -137,16 +188,18 @@ export function CallDesk() {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Something went wrong";
-        setMessages((m) => [
-          ...m,
+        const withErr: Msg[] = [
+          ...withUser,
           { role: "assistant", text: `Sorry — ${message}` },
-        ]);
+        ];
+        messagesRef.current = withErr;
+        setMessages(withErr);
         setStatus("");
       } finally {
         setBusy(false);
       }
     },
-    [busy, siteBase, speak],
+    [busy, lastListings, profilePhone, siteBase, speak],
   );
 
   useEffect(() => {
@@ -167,8 +220,12 @@ export function CallDesk() {
         if (data.welcomeMessage) {
           setWelcome(data.welcomeMessage);
           setWelcomeEdit(data.welcomeMessage);
-          setMessages([{ role: "assistant", text: data.welcomeMessage }]);
-          void speak(data.welcomeMessage);
+          const welcomeMsg: Msg[] = [
+            { role: "assistant", text: data.welcomeMessage },
+          ];
+          messagesRef.current = welcomeMsg;
+          setMessages(welcomeMsg);
+          void speak(data.welcomeMessage, "en");
         }
       } catch {
         /* ignore */
@@ -211,7 +268,7 @@ export function CallDesk() {
           ? "ogg"
           : "webm";
       form.append("audio", blob, `speech.${ext}`);
-      form.append("language", micLang);
+      form.append("language", "en");
       const res = await fetch("/api/stt", { method: "POST", body: form });
       const data = (await res.json()) as { text?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "Transcription failed");
@@ -236,10 +293,9 @@ export function CallDesk() {
       return;
     }
     if (!sttReady) {
-      setStatus("Add your Fish API key in Settings so the mic works everywhere");
+      setStatus("Voice mic is temporarily unavailable — please type your question");
       listeningRef.current = false;
       setListening(false);
-      setTab("settings");
       return;
     }
 
@@ -340,6 +396,7 @@ export function CallDesk() {
       if (!res.ok) throw new Error(data.error || "Failed to load");
       setWelcomeEdit(data.settings?.welcomeMessage || "");
       setFishRef(data.settings?.fishReferenceId || "");
+      setFishRefEn(data.settings?.fishReferenceIdEn || "");
       setSiteBaseEdit(
         data.settings?.siteBaseUrl || "https://ygianaturalhealth.com",
       );
@@ -363,6 +420,7 @@ export function CallDesk() {
         settings: {
           welcomeMessage: welcomeEdit,
           fishReferenceId: fishRef,
+          fishReferenceIdEn: fishRefEn,
           siteBaseUrl: siteBaseEdit,
         },
       };
@@ -433,7 +491,7 @@ export function CallDesk() {
       <header className="calldesk-header">
         <div className="calldesk-brand">
           YGIA Call Assistant
-          <span>Voice help · separate from the shop</span>
+          <span>Talk to us · shop when you need</span>
         </div>
         <nav className="calldesk-tabs" aria-label="Main">
           <button
@@ -449,16 +507,6 @@ export function CallDesk() {
             onClick={() => setTab("store")}
           >
             Store
-          </button>
-          <button
-            type="button"
-            className={tab === "settings" ? "active" : ""}
-            onClick={() => {
-              setTab("settings");
-              void loadSettings();
-            }}
-          >
-            Settings
           </button>
         </nav>
       </header>
@@ -476,24 +524,23 @@ export function CallDesk() {
                 {listening ? "Listening…" : busy ? "…" : "Tap to talk"}
               </button>
               <p className="call-hint">
-                Ask about products, shipping, returns, or payments — in Greek or
-                English. Works in any modern browser (audio is transcribed on the
-                server). Say “take me to…” to open the store page.
-                {!sttReady
-                  ? " Add your Fish API key in Settings first."
-                  : ""}
+                Ask about our products — what they’re for, ingredients, price.
+                When she offers options, say A, B, or C. Say “take me to…” to
+                open a product page.
               </p>
+              <div className="profile-bar">
+                <input
+                  value={profilePhone}
+                  onChange={(e) => setProfilePhone(e.target.value)}
+                  placeholder="Client phone (optional profile)"
+                  inputMode="tel"
+                />
+                {profileName ? (
+                  <span className="profile-chip">Profile: {profileName}</span>
+                ) : null}
+              </div>
               <div className="call-status">{status}</div>
               <div className="call-actions">
-                <button
-                  type="button"
-                  className="btn-cd secondary"
-                  onClick={() => setMicLang((l) => (l === "el" ? "en" : "el"))}
-                  disabled={listening}
-                  title="Transcription language hint"
-                >
-                  Mic: {micLang === "el" ? "Ελληνικά" : "English"}
-                </button>
                 <button
                   type="button"
                   className="btn-cd secondary"
@@ -506,11 +553,14 @@ export function CallDesk() {
                   className="btn-cd secondary"
                   onClick={() => {
                     stopAudio();
-                    setMessages(
-                      welcome
-                        ? [{ role: "assistant", text: welcome }]
-                        : [],
-                    );
+                    const cleared: Msg[] = welcome
+                      ? [{ role: "assistant", text: welcome }]
+                      : [];
+                    messagesRef.current = cleared;
+                    setMessages(cleared);
+                    setLastListings([]);
+                    setProfileName("");
+                    setSuggestedPrompts([]);
                   }}
                 >
                   Clear chat
@@ -530,6 +580,21 @@ export function CallDesk() {
                   }
                 }}
               />
+              {suggestedPrompts.length ? (
+                <div className="suggested-prompts" aria-label="Likely next questions">
+                  {suggestedPrompts.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className="prompt-chip"
+                      disabled={busy}
+                      onClick={() => void ask(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div className="call-actions">
                 <button
                   type="button"
@@ -546,24 +611,43 @@ export function CallDesk() {
               {messages.map((m, i) => (
                 <div key={i} className={`call-msg ${m.role}`}>
                   {m.text}
-                  {m.navigation?.url ? (
-                    <div>
-                      <button
-                        type="button"
-                        className="open-store"
-                        onClick={() =>
-                          window.open(
-                            resolveShopUrl(
-                              `${m.navigation!.url}${m.navigation!.hash || ""}`,
-                              siteBase,
-                            ),
-                            "_blank",
-                            "noopener,noreferrer",
-                          )
-                        }
-                      >
-                        → {m.navigation.label || "Open in store"}
-                      </button>
+                  {m.listings?.length ? (
+                    <div className="product-listings">
+                      {m.listings.map((listing, li) => (
+                        <a
+                          key={listing.url}
+                          className="product-card"
+                          href={resolveShopUrl(
+                            `${listing.url}${listing.hash || ""}`,
+                            siteBase,
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <span className="choice-badge">
+                            {listing.choice || ["A", "B", "C"][li]}
+                          </span>
+                          {listing.image ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={listing.image}
+                              alt={listing.label || "Product"}
+                              className="product-card-img"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="product-card-img placeholder" />
+                          )}
+                          <span className="product-card-meta">
+                            <span className="product-card-title">
+                              {listing.label || "Product"}
+                            </span>
+                            <span className="product-card-cta">
+                              View in shop →
+                            </span>
+                          </span>
+                        </a>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -608,136 +692,6 @@ export function CallDesk() {
           </div>
         ) : null}
 
-        {tab === "settings" ? (
-          <div className="settings-panel">
-            <div className="panel-card">
-              <h2>Voice &amp; API keys</h2>
-              <p className="hint">
-                Admin secret defaults to <code>change-me</code>. Fish API key is
-                saved on the server (not in the browser).
-              </p>
-              <label>
-                Admin secret
-                <input
-                  type="password"
-                  value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
-                  autoComplete="off"
-                />
-              </label>
-              <div className="btn-row-cd">
-                <button
-                  type="button"
-                  className="btn-cd secondary"
-                  onClick={() => void loadSettings()}
-                >
-                  Load current
-                </button>
-              </div>
-              <label>
-                Fish Audio API key
-                <input
-                  type="password"
-                  value={fishKey}
-                  onChange={(e) => setFishKey(e.target.value)}
-                  placeholder={
-                    secretsMeta?.fishApiKey.configured
-                      ? `Configured ${secretsMeta.fishApiKey.hint} — paste new to replace`
-                      : "Paste Fish API key"
-                  }
-                  autoComplete="off"
-                />
-              </label>
-              <label>
-                Fish voice reference_id (Greek answers)
-                <input
-                  type="text"
-                  value={fishRef}
-                  onChange={(e) => setFishRef(e.target.value)}
-                  placeholder="e.g. 2a9605eeafe84974b5b20628d42c0060"
-                />
-              </label>
-              <p className="hint">
-                Greek replies use Fish Audio · English replies use Edge Ava
-                Multilingual
-              </p>
-              <label>
-                NVIDIA API key (optional override)
-                <input
-                  type="password"
-                  value={nvidiaKey}
-                  onChange={(e) => setNvidiaKey(e.target.value)}
-                  placeholder={
-                    secretsMeta?.nvidiaApiKey.configured
-                      ? `Configured ${secretsMeta.nvidiaApiKey.hint}`
-                      : "Leave blank to keep .env key"
-                  }
-                  autoComplete="off"
-                />
-              </label>
-              <label>
-                Store URL (opened by Store tab)
-                <input
-                  type="text"
-                  value={siteBaseEdit}
-                  onChange={(e) => setSiteBaseEdit(e.target.value)}
-                />
-              </label>
-              <label>
-                Welcome message
-                <textarea
-                  value={welcomeEdit}
-                  onChange={(e) => setWelcomeEdit(e.target.value)}
-                />
-              </label>
-              <button
-                type="button"
-                className="btn-cd"
-                onClick={() => void saveSettings()}
-              >
-                Save settings
-              </button>
-            </div>
-
-            <div className="panel-card">
-              <h2>Upload knowledge file</h2>
-              <p className="hint">
-                Choose a <code>.txt</code>, <code>.md</code>, <code>.csv</code>,
-                or <code>.json</code> FAQ file, then ingest.
-              </p>
-              <div className="file-row">
-                <input
-                  type="file"
-                  accept=".txt,.md,.csv,.json,text/plain,text/markdown,application/json"
-                  onChange={(e) => onFile(e.target.files?.[0] || null)}
-                />
-                {fileName ? <span className="hint">{fileName}</span> : null}
-              </div>
-              <label>
-                FAQ text (from file or paste)
-                <textarea
-                  value={faqsText}
-                  onChange={(e) => setFaqsText(e.target.value)}
-                  placeholder={"Q: …\nA: …"}
-                />
-              </label>
-              <div className="btn-row-cd">
-                <button
-                  type="button"
-                  className="btn-cd"
-                  disabled={!faqsText.trim()}
-                  onClick={() => void ingestFaqs(faqsText)}
-                >
-                  Ingest file / FAQs
-                </button>
-              </div>
-              {stats ? <p className="hint">{stats}</p> : null}
-            </div>
-
-            {settingsStatus ? <p className="ok">{settingsStatus}</p> : null}
-            {settingsError ? <p className="err">{settingsError}</p> : null}
-          </div>
-        ) : null}
       </main>
     </div>
   );

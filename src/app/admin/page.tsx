@@ -9,7 +9,7 @@ export default function AdminPage() {
         </a>
         <ul className="nav-links">
           <li>
-            <a href="/">Call desk</a>
+            <a href="/">Customer call desk</a>
           </li>
         </ul>
       </div>

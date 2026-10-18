@@ -9,6 +9,7 @@ export async function nvidiaChatCompletion(opts: {
   system: string;
   user: string;
   temperature?: number;
+  maxTokens?: number;
 }): Promise<string> {
   const { nvidiaApiKey, nvidiaBaseUrl, nvidiaModel } = getEnv();
   if (!nvidiaApiKey) {
@@ -24,7 +25,9 @@ export async function nvidiaChatCompletion(opts: {
     },
     body: JSON.stringify({
       model: nvidiaModel,
-      temperature: opts.temperature ?? 0.4,
+      temperature: opts.temperature ?? 0.3,
+      max_tokens: opts.maxTokens ?? 220,
+      stream: false,
       messages: [
         { role: "system", content: opts.system },
         { role: "user", content: opts.user },

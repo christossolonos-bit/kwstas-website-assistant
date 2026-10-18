@@ -5,32 +5,45 @@ import { loadStore } from "./rag/store";
 const FISH_TTS_URL = "https://api.fish.audio/v1/tts";
 const FISH_STT_URL = "https://api.fish.audio/v1/asr";
 
+/** Resolve Fish voice reference_id (English-only app). */
+export async function fishReferenceFor(
+  _language?: AppLanguage,
+): Promise<string> {
+  const { fishReferenceId, fishReferenceIdEn } = getEnv();
+  let id = (fishReferenceIdEn || fishReferenceId || "").trim();
+
+  try {
+    const store = await loadStore();
+    const fromEn = (store.settings.fishReferenceIdEn || "").trim();
+    const fromEl = (store.settings.fishReferenceId || "").trim();
+    if (fromEn) id = fromEn;
+    else if (fromEl) id = fromEl;
+  } catch {
+    /* env fallback */
+  }
+
+  return id;
+}
+
 export async function fishTextToSpeech(
   text: string,
   language?: AppLanguage,
 ): Promise<ArrayBuffer> {
-  const { fishApiKey, fishReferenceId, fishTtsModel, demoMode } = getEnv();
+  const { fishApiKey, fishTtsModel, demoMode } = getEnv();
 
   if (demoMode || !fishApiKey) {
     return synthesizeSilentMp3();
   }
 
-  let referenceId = (fishReferenceId || "").trim();
-  try {
-    const store = await loadStore();
-    const fromAdmin = (store.settings.fishReferenceId || "").trim();
-    if (fromAdmin) referenceId = fromAdmin;
-  } catch {
-    /* use env fallback */
-  }
+  const lang = language ?? detectLanguage(text);
+  const referenceId = await fishReferenceFor(lang);
 
   if (!referenceId) {
     throw new Error(
-      "Fish voice reference_id is missing. Save it in Settings or set FISH_REFERENCE_ID.",
+      "Fish voice reference_id is missing. Save Greek/English voices in Settings or set FISH_REFERENCE_ID / FISH_REFERENCE_ID_EN.",
     );
   }
 
-  const lang = language ?? detectLanguage(text);
   const body: Record<string, unknown> = {
     text,
     format: "mp3",

@@ -1,13 +1,18 @@
 import { assertAdmin, getEnv } from "@/lib/env";
 import { json, optionsOk } from "@/lib/http";
 import {
+  deleteProfile,
+  loadProfiles,
+  upsertProfile,
+} from "@/lib/profiles";
+import {
   ingestFaqsFromText,
   rebuildIndex,
   replacePages,
 } from "@/lib/rag/ingest";
 import { loadStore, updateSettings } from "@/lib/rag/store";
 import { maskSecret, readSecretsSync, updateSecrets } from "@/lib/secrets";
-import type { PageEntry } from "@/lib/types";
+import type { ClientProfile, PageEntry } from "@/lib/types";
 
 export async function OPTIONS() {
   return optionsOk();
@@ -20,6 +25,7 @@ export async function GET(req: Request) {
   const store = await loadStore();
   const secrets = readSecretsSync();
   const env = getEnv();
+  const profiles = await loadProfiles();
   return json({
     updatedAt: store.updatedAt,
     faqCount: store.faqs.length,
@@ -38,6 +44,7 @@ export async function GET(req: Request) {
       product,
       tags,
     })),
+    profiles,
   });
 }
 
@@ -54,10 +61,13 @@ export async function POST(req: Request) {
       settings?: {
         welcomeMessage?: string;
         fishReferenceId?: string;
+        fishReferenceIdEn?: string;
         siteBaseUrl?: string;
       };
       fishApiKey?: string;
       nvidiaApiKey?: string;
+      profile?: Partial<ClientProfile> & { name?: string };
+      profileId?: string;
     };
 
     const action = body.action ?? "ingest_faqs";
@@ -114,6 +124,35 @@ export async function POST(req: Request) {
       await saveStore(store);
       const result = await rebuildIndex();
       return json({ ok: true, ...result });
+    }
+
+    if (action === "list_profiles") {
+      return json({ ok: true, profiles: await loadProfiles() });
+    }
+
+    if (action === "upsert_profile") {
+      const p = body.profile;
+      if (!p?.name?.trim()) {
+        return json({ error: "profile.name is required" }, 400);
+      }
+      const saved = await upsertProfile({
+        id: p.id,
+        name: p.name,
+        phone: p.phone,
+        email: p.email,
+        goals: p.goals,
+        productsUsing: p.productsUsing,
+        notes: p.notes,
+      });
+      return json({ ok: true, profile: saved, profiles: await loadProfiles() });
+    }
+
+    if (action === "delete_profile") {
+      if (!body.profileId) {
+        return json({ error: "profileId is required" }, 400);
+      }
+      const ok = await deleteProfile(body.profileId);
+      return json({ ok, profiles: await loadProfiles() });
     }
 
     return json({ error: `Unknown action: ${action}` }, 400);

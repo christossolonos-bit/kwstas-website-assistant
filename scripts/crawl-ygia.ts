@@ -118,6 +118,8 @@ type ShopifyProduct = {
   tags: string[] | string;
   variants: ShopifyVariant[];
   options?: Array<{ name: string; values: string[] }>;
+  featured_image?: string | { src?: string } | null;
+  images?: Array<string | { src?: string }>;
 };
 
 type ShopifyCollection = {
@@ -255,11 +257,21 @@ function productToPage(
     .filter(Boolean)
     .join(" — ");
 
+  const featured = p.featured_image;
+  const firstImg = p.images?.[0];
+  const image =
+    (typeof featured === "string" && featured) ||
+    (featured && typeof featured === "object" && featured.src) ||
+    (typeof firstImg === "string" && firstImg) ||
+    (firstImg && typeof firstImg === "object" && firstImg.src) ||
+    undefined;
+
   return {
     id: randomUUID(),
     url: `/products/${p.handle}`,
     title: p.title,
     description,
+    image: image || undefined,
     keywords: [
       ...tags,
       p.product_type,

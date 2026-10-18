@@ -2,39 +2,17 @@ export type AppLanguage = "el" | "en";
 
 const GREEK_RE = /[\u0370-\u03FF\u1F00-\u1FFF]/;
 
-/** Detect reply language from customer text. Defaults to English. */
-export function detectLanguage(text: string): AppLanguage {
-  const sample = text.trim();
-  if (!sample) return "en";
-
-  let greek = 0;
-  let latin = 0;
-  for (const ch of sample) {
-    if (GREEK_RE.test(ch)) greek += 1;
-    else if (/[A-Za-z]/.test(ch)) latin += 1;
-  }
-
-  if (greek === 0 && latin === 0) return "en";
-  // Any real Greek in the text → Greek (avoids English TTS on Ελληνικά)
-  if (greek >= 1) return "el";
+/** Detect reply language from customer text. App is English-only. */
+export function detectLanguage(_text: string): AppLanguage {
   return "en";
 }
 
-/**
- * Language for TTS: always follow the spoken text so Greek never plays
- * through an English voice (and vice versa). Hint only if text has no letters.
- */
+/** Language for TTS / Fish voice — English only. */
 export function speakLanguage(
-  text: string,
-  hint?: AppLanguage | string | null,
+  _text: string,
+  _hint?: AppLanguage | string | null,
 ): AppLanguage {
-  const sample = text.trim();
-  if (!sample) return hint === "el" ? "el" : "en";
-  const fromText = detectLanguage(sample);
-  // Clear script in the answer always wins over any API/UI hint
-  if (/[\u0370-\u03FF\u1F00-\u1FFF]/.test(sample)) return "el";
-  if (/[A-Za-z]/.test(sample)) return "en";
-  return hint === "el" || hint === "en" ? hint : fromText;
+  return "en";
 }
 
 export function fishLanguageTag(lang: AppLanguage): string {

@@ -1,8 +1,7 @@
 import { speakLanguage } from "@/lib/language";
 import { edgeTextToSpeech, edgeVoiceFor } from "@/lib/edge-tts";
-import { fishTextToSpeech } from "@/lib/fish";
+import { fishReferenceFor, fishTextToSpeech } from "@/lib/fish";
 import { getEnv } from "@/lib/env";
-import { loadStore } from "@/lib/rag/store";
 import { corsHeaders, json, optionsOk } from "@/lib/http";
 
 export async function OPTIONS() {
@@ -20,49 +19,33 @@ export async function POST(req: Request) {
       return json({ error: "text too long" }, 400);
     }
 
-    // Greek answers → Fish; English answers → Edge Ava Multilingual
+    // Mic/UI language picks the Fish voice: el = Greek id, en = English id
     const language = speakLanguage(text, body.language);
-    const { fishApiKey, fishReferenceId } = getEnv();
-
-    let referenceId = fishReferenceId;
-    try {
-      const store = await loadStore();
-      if (store.settings.fishReferenceId?.trim()) {
-        referenceId = store.settings.fishReferenceId.trim();
-      }
-    } catch {
-      /* env fallback */
-    }
+    const { fishApiKey } = getEnv();
+    const referenceId = await fishReferenceFor(language);
 
     let audio: ArrayBuffer;
     let provider: string;
     let voiceLabel: string;
 
-    if (language === "el") {
-      if (fishApiKey && referenceId) {
-        try {
-          audio = await fishTextToSpeech(text, "el");
-          provider = "fish";
-          voiceLabel = referenceId;
-        } catch (fishErr) {
-          console.warn(
-            "Fish TTS (Greek) failed, falling back to Edge Athina:",
-            fishErr instanceof Error ? fishErr.message : fishErr,
-          );
-          audio = await edgeTextToSpeech(text, "el");
-          provider = "edge-fallback";
-          voiceLabel = edgeVoiceFor("el");
-        }
-      } else {
-        audio = await edgeTextToSpeech(text, "el");
-        provider = "edge";
-        voiceLabel = edgeVoiceFor("el");
+    if (fishApiKey && referenceId) {
+      try {
+        audio = await fishTextToSpeech(text, language);
+        provider = "fish";
+        voiceLabel = referenceId;
+      } catch (fishErr) {
+        console.warn(
+          `Fish TTS (${language}) failed, falling back to Edge:`,
+          fishErr instanceof Error ? fishErr.message : fishErr,
+        );
+        audio = await edgeTextToSpeech(text, language);
+        provider = "edge-fallback";
+        voiceLabel = edgeVoiceFor(language);
       }
     } else {
-      // English → Edge Ava Multilingual
-      audio = await edgeTextToSpeech(text, "en");
+      audio = await edgeTextToSpeech(text, language);
       provider = "edge";
-      voiceLabel = edgeVoiceFor("en");
+      voiceLabel = edgeVoiceFor(language);
     }
 
     return new Response(audio, {

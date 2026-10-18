@@ -11,6 +11,8 @@ export type PageEntry = {
   description: string;
   hash?: string;
   keywords?: string[];
+  /** Shopify product image URL */
+  image?: string;
   /** Full text captured by the embed scanner */
   content?: string;
   sections?: PageSection[];
@@ -47,7 +49,10 @@ export type KnowledgeStore = {
 
 export type AssistantSettings = {
   welcomeMessage: string;
+  /** Greek Fish voice reference_id (default) */
   fishReferenceId: string;
+  /** English Fish voice reference_id */
+  fishReferenceIdEn: string;
   siteBaseUrl: string;
 };
 
@@ -55,13 +60,42 @@ export type NavigationTarget = {
   url: string;
   hash?: string;
   label: string;
+  image?: string;
+  /** Spoken/UI choice letter so the customer can say “option B” */
+  choice?: "A" | "B" | "C";
+};
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+/** Owner-managed client profile for personalized advice. */
+export type ClientProfile = {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  /** Goals / situations: sleep, stress, drive, joints… */
+  goals?: string[];
+  /** Product titles or handles they already use */
+  productsUsing?: string[];
+  /** Free-text notes from the store owner */
+  notes?: string;
+  updatedAt: string;
 };
 
 export type ChatResponse = {
   answer: string;
   navigation: NavigationTarget | null;
+  /** Shopify product/collection links to show when a product is suggested */
+  listings?: NavigationTarget[];
   language?: "el" | "en";
   sources?: Array<{ title: string; url?: string }>;
+  /** Profile used for this reply, if any */
+  profile?: { id: string; name: string } | null;
+  /** Predicted next questions (from symptom playbook + profile card) */
+  suggestedPrompts?: string[];
 };
 
 /** Payload sent by the embed widget after reading the host page. */

@@ -11,7 +11,10 @@ export function getEnv() {
       process.env.NVIDIA_MODEL ?? "nvidia/nemotron-3.5-super-vl-120b-a12b",
     /** Settings UI / data/secrets.json wins over .env */
     fishApiKey: secrets.fishApiKey || process.env.FISH_API_KEY || "",
+    /** Greek Fish voice (default) */
     fishReferenceId: process.env.FISH_REFERENCE_ID ?? "",
+    /** English Fish voice */
+    fishReferenceIdEn: process.env.FISH_REFERENCE_ID_EN ?? "",
     fishTtsModel: process.env.FISH_TTS_MODEL ?? "s2.1-pro-free",
     ttsProvider: (process.env.TTS_PROVIDER ?? "edge").toLowerCase(),
     edgeVoiceEl: process.env.EDGE_VOICE_EL ?? "",

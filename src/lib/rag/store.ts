@@ -16,8 +16,9 @@ const defaultSettings = (): AssistantSettings => {
   const env = getEnv();
   return {
     welcomeMessage:
-      "Hi! I can answer product questions and take you to the right page. Type or speak anytime.",
+      "Hi! Ask me about YGIA products — what they’re for, ingredients, and prices.",
     fishReferenceId: env.fishReferenceId,
+    fishReferenceIdEn: env.fishReferenceIdEn,
     siteBaseUrl: env.siteBaseUrl,
   };
 };
