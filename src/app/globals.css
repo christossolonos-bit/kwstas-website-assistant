@@ -1,0 +1,223 @@
+:root {
+  --ink: #15201c;
+  --muted: #5c6b64;
+  --paper: #f3f6f4;
+  --leaf: #1f6f5b;
+  --leaf-deep: #0f3d34;
+  --sand: #e7efe9;
+  --accent: #c4a574;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #dcebe3 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #efe6d4 0%, transparent 50%),
+    linear-gradient(180deg, #f7faf8 0%, #eef3f0 100%);
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+a {
+  color: var(--leaf-deep);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--leaf);
+}
+
+main {
+  width: min(980px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 6rem;
+}
+
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.25rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 0 1.5rem;
+  border-bottom: 1px solid rgba(15, 61, 52, 0.12);
+  margin-bottom: 2rem;
+}
+
+.brand {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.55rem;
+  letter-spacing: 0.02em;
+  color: var(--leaf-deep);
+  text-decoration: none;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-links a {
+  text-decoration: none;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.nav-links a:hover {
+  color: var(--leaf-deep);
+}
+
+.hero h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.15;
+  margin: 0 0 0.75rem;
+  max-width: 14ch;
+}
+
+.hero p {
+  color: var(--muted);
+  font-size: 1.05rem;
+  max-width: 42ch;
+  line-height: 1.55;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+  margin-top: 2rem;
+}
+
+.product-card {
+  display: block;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 61, 52, 0.1);
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.product-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(15, 61, 52, 0.1);
+}
+
+.product-card h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  margin: 0 0 0.5rem;
+}
+
+.product-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(15, 61, 52, 0.1);
+  border-radius: 16px;
+  padding: 1.5rem;
+}
+
+.panel h1,
+.panel h2 {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.section-anchor {
+  scroll-margin-top: 96px;
+  margin-top: 2rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(15, 61, 52, 0.18);
+}
+
+.admin-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.admin-form input,
+.admin-form textarea {
+  font: inherit;
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 61, 52, 0.18);
+  background: #fff;
+}
+
+.admin-form textarea {
+  min-height: 160px;
+  resize: vertical;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  background: linear-gradient(145deg, var(--leaf), var(--leaf-deep));
+  color: #f5faf8;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn.secondary {
+  background: #fff;
+  color: var(--leaf-deep);
+  border: 1px solid rgba(15, 61, 52, 0.2);
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.status-ok {
+  color: var(--leaf-deep);
+}
+
+.status-err {
+  color: #9b2c2c;
+}
+
+.code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--sand);
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}

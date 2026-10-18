@@ -1,0 +1,32 @@
+{
+  "name": "voice-site-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run build:widget && next dev",
+    "postinstall": "npm run build:widget",
+    "build": "npm run build:widget && next build",
+    "build:widget": "esbuild src/widget/embed.ts --bundle --minify --outfile=public/embed.js --format=iife --target=es2020",
+    "dev:widget": "esbuild src/widget/embed.ts --bundle --outfile=public/embed.js --format=iife --target=es2020 --watch",
+    "start": "next start",
+    "lint": "eslint",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@andresaya/edge-tts": "^1.9.1",
+    "next": "^15.5.28",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.2",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  }
+}
