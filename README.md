@@ -1,8 +1,8 @@
-# Voice Site Assistant
+# kwstas-website-assistant
 
-A **voice chatbot for static websites** — so customers get spoken answers instead of calling the owner for the same follow-ups.
+Embeddable **voice website assistant** — so customers get spoken answers instead of calling the owner for the same follow-ups.
 
-No OpenAI. No video avatar. The owner pastes the answers they usually give on the phone; the widget on the site talks back in Greek or English and can open the right page.
+No OpenAI required. No video avatar. The owner pastes the answers they usually give on the phone; the widget on the site talks back in Greek or English and can open the right page.
 
 ## Who it’s for
 
@@ -30,15 +30,16 @@ Owner FAQs in `/admin` still help a lot for phone-style answers that are not wri
 
 ## Owner workflow
 
-1. Run this app (or deploy it once).
+1. Run this app (or deploy it once, e.g. Railway).
 2. Open `/admin` and paste Q&A in Greek and/or English (the real answers you give on calls).
-3. List important site URLs in the page catalog.
+3. List important site URLs in the page catalog (or rely on auto-scan).
 4. Add one script tag to your static HTML:
 
 ```html
 <script
   src="https://YOUR_ASSISTANT_HOST/embed.js"
   data-api-base="https://YOUR_ASSISTANT_HOST"
+  data-auto-scan="true"
   async></script>
 ```
 
